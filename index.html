@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+
+body{
+  margin:0;
+  overflow:hidden;
+  background:black;
+  color:white;
+  font-family:sans-serif;
+}
+
+#target{
+  position:absolute;
+  top:50%;
+  transform:translate(-50%,-50%);
+  font-size:32px;
+  transition:left 0.05s linear;
+}
+
+#target img {
+  width: 200px;
+}
+
+#info{
+  position:absolute;
+  top:0px;
+  width:100%;
+  text-align:center;
+  font-size:14px;
+}
+
+#startBtn{
+  position:absolute;
+  top:40%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  padding:15px 25px;
+  font-size:18px;
+}
+
+</style>
+</head>
+
+<body>
+
+<button id="startBtn">Start Compass</button>
+
+<div id="target"><img src="./1.png"/></div>
+
+<div id="info">Waiting for sensors...</div>
+
+<script>
+
+// -------- Mount Kailash --------
+
+const targetLat = 31.0675 * Math.PI/180;
+const targetLon = 81.3119 * Math.PI/180;
+
+
+// -------- State --------
+
+let userLat = null;
+let userLon = null;
+
+let rawHeading = null;
+let smoothHeading = null;
+
+
+// -------- Settings --------
+
+const FOV = 60;              // horizontal field of view
+const SMOOTHING = 0.1;       // compass smoothing factor
+
+
+// -------- Utils --------
+
+function toRad(d){ return d*Math.PI/180 }
+function toDeg(r){ return r*180/Math.PI }
+
+
+// Normalize to [-180,180]
+
+function normalize(a){
+  return ((a+540)%360)-180
+}
+
+
+// -------- Bearing Calculation --------
+
+function calculateBearing(lat1, lon1, lat2, lon2){
+
+  const dLon = lon2-lon1
+
+  const x = Math.sin(dLon)*Math.cos(lat2)
+
+  const y =
+      Math.cos(lat1)*Math.sin(lat2)
+      - Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon)
+
+  let brng = Math.atan2(x,y)
+
+  brng = (toDeg(brng)+360)%360
+
+  return brng
+}
+
+
+
+// -------- GPS --------
+
+function startGPS(){
+
+navigator.geolocation.watchPosition(pos=>{
+
+  userLat = toRad(pos.coords.latitude)
+  userLon = toRad(pos.coords.longitude)
+
+},
+err=>{
+  document.getElementById("info").innerText="GPS error"
+},
+{
+  enableHighAccuracy:true,
+  maximumAge:0,
+  timeout:5000
+})
+
+}
+
+
+
+// -------- Orientation --------
+
+function handleOrientation(e){
+
+  let heading = null
+
+  if(e.webkitCompassHeading !== undefined){
+
+    heading = e.webkitCompassHeading
+
+  }
+  else if(e.absolute === true && e.alpha !== null){
+
+    heading = 360 - e.alpha
+  }
+  else if(e.alpha !== null){
+
+    heading = 360 - e.alpha
+  }
+
+  if(heading !== null){
+
+    rawHeading = heading
+
+    if(smoothHeading === null)
+      smoothHeading = heading
+
+    else
+      smoothHeading =
+        smoothHeading*(1-SMOOTHING)
+        + heading*SMOOTHING
+  }
+}
+
+
+
+// -------- Sensor Permission (iOS) --------
+
+async function startSensors(){
+
+  if(typeof DeviceOrientationEvent !== "undefined"
+     && typeof DeviceOrientationEvent.requestPermission === "function"){
+
+    try{
+
+      const response =
+        await DeviceOrientationEvent.requestPermission()
+
+      if(response==="granted"){
+
+        window.addEventListener("deviceorientation",
+          handleOrientation,true)
+
+      }
+
+    }catch(e){
+      alert("Sensor permission denied")
+    }
+
+  }else{
+
+    window.addEventListener("deviceorientation",
+      handleOrientation,true)
+
+  }
+
+}
+
+
+
+// -------- Render Loop --------
+
+function update(){
+
+if(userLat!==null && userLon!==null && smoothHeading!==null){
+
+  const bearing =
+    calculateBearing(userLat,userLon,targetLat,targetLon)
+
+  const diff =
+    normalize(bearing-smoothHeading)
+
+  const width = window.innerWidth
+
+  const pxPerDeg = width/FOV
+
+  const x = width/2 + diff*pxPerDeg
+
+  const target =
+    document.getElementById("target")
+
+  if(Math.abs(diff) > FOV/2){
+
+    target.style.display="none"
+
+  }else{
+
+    target.style.display="block"
+
+    target.style.left = x+"px"
+  }
+
+  document.getElementById("info").innerText =
+
+    "Bearing: "+bearing.toFixed(1)+"° | " +
+    "Heading: "+smoothHeading.toFixed(1)+"° | " +
+    "Diff: "+diff.toFixed(1)+"°"
+
+}
+
+requestAnimationFrame(update)
+
+}
+
+
+
+update()
+
+
+
+// -------- Start Button --------
+
+document.getElementById("startBtn")
+.onclick=async()=>{
+
+  document.getElementById("startBtn").style.display="none"
+
+  startGPS()
+
+  startSensors()
+
+}
+
+
+</script>
+
+</body>
+</html>
